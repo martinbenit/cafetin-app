@@ -223,6 +223,24 @@ export default function TableRoom({ spaceId, isHost }: TableRoomProps) {
       .on('broadcast', { event: 'cohost_promoted' }, ({ payload }) => {
         updateGuestTraits(payload.guestId, payload.traits);
       })
+      .on('broadcast', { event: 'request_criteria' }, () => {
+        if (isHost) {
+          const saved = localStorage.getItem(`cafetin_criteria_${spaceId}`);
+          if (saved) {
+            supabase.channel(`broadcast_${spaceId}`).send({
+              type: 'broadcast',
+              event: 'sync_criteria',
+              payload: { criteriaList: JSON.parse(saved) }
+            });
+          }
+        }
+      })
+      .on('broadcast', { event: 'sync_criteria' }, ({ payload }) => {
+        if (!isHost) {
+          localStorage.setItem(`cafetin_criteria_${spaceId}`, JSON.stringify(payload.criteriaList));
+          window.dispatchEvent(new CustomEvent('cafetin_sync_criteria', { detail: payload.criteriaList }));
+        }
+      })
       .on('broadcast', { event: 'raffle_start' }, ({ payload }) => {
         setRaffleWinner(payload.winner);
         setIsRaffleOpen(true);
@@ -611,6 +629,7 @@ export default function TableRoom({ spaceId, isHost }: TableRoomProps) {
             isOpen={isEvalOpen}
             onClose={() => setIsEvalOpen(false)}
             spaceId={spaceId}
+            isHost={isHost}
           />
           <CloseSpaceModal
             isOpen={isCloseModalOpen}

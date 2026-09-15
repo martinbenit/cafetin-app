@@ -11,9 +11,10 @@ interface EvaluationModalProps {
   isOpen: boolean;
   onClose: () => void;
   spaceId: string;
+  isHost?: boolean;
 }
 
-export default function EvaluationModal({ isOpen, onClose, spaceId }: EvaluationModalProps) {
+export default function EvaluationModal({ isOpen, onClose, spaceId, isHost = false }: EvaluationModalProps) {
   const defaultCriteria = ['Claridad en la exposición', 'Dominio del tema', 'Comunicación', 'Trabajo en equipo'];
   
   const [criteriaList, setCriteriaList] = useState<string[]>([]);
@@ -23,6 +24,14 @@ export default function EvaluationModal({ isOpen, onClose, spaceId }: Evaluation
   const [selectedGuest, setSelectedGuest] = useState<string>('');
   const [scores, setScores] = useState<Record<string, number>>({});
   const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    const handleSync = (e: any) => {
+      setCriteriaList(e.detail);
+    };
+    window.addEventListener('cafetin_sync_criteria', handleSync);
+    return () => window.removeEventListener('cafetin_sync_criteria', handleSync);
+  }, []);
 
   // Load custom criteria from localStorage on mount
   useEffect(() => {
@@ -38,15 +47,29 @@ export default function EvaluationModal({ isOpen, onClose, spaceId }: Evaluation
       } else {
         setCriteriaList(defaultCriteria);
       }
+
+      if (!isHost) {
+        supabase.channel(`broadcast_${spaceId}`).send({
+          type: 'broadcast',
+          event: 'request_criteria'
+        });
+      }
     }
-  }, [isOpen, spaceId]);
+  }, [isOpen, spaceId, isHost]);
 
   // Sync criteria to localStorage when it changes
   useEffect(() => {
     if (criteriaList.length > 0) {
       localStorage.setItem(`cafetin_criteria_${spaceId}`, JSON.stringify(criteriaList));
+      if (isHost) {
+        supabase.channel(`broadcast_${spaceId}`).send({
+          type: 'broadcast',
+          event: 'sync_criteria',
+          payload: { criteriaList }
+        });
+      }
     }
-  }, [criteriaList, spaceId]);
+  }, [criteriaList, spaceId, isHost]);
 
   const fetchGuestsAndEvals = async () => {
     const { data: gData } = await supabase.from('guests').select('*').eq('space_id', spaceId);
