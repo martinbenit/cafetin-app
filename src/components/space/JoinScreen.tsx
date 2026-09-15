@@ -51,6 +51,14 @@ export default function JoinScreen({ spaceId, onJoin }: JoinScreenProps) {
       localStorage.setItem(`cafetin_guest_${spaceId}`, data.id);
       localStorage.setItem(`cafetin_guest_name_${spaceId}`, data.name);
       localStorage.setItem(`cafetin_guest_seed_${spaceId}`, JSON.stringify({ seed: selectedAvatar.seed, style: selectedAvatar.styleName }));
+      
+      // Workaround: explicitly broadcast the join event in case postgres_changes isn't enabled for the table
+      await supabase.channel(`broadcast_${spaceId}`).send({
+        type: 'broadcast',
+        event: 'guest_joined',
+        payload: { guest: data }
+      });
+
       onJoin();
     } else {
       console.error(error);

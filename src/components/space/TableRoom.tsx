@@ -4,12 +4,13 @@ import { motion } from 'framer-motion';
 import { supabase } from '@/lib/supabase';
 import { useStore } from '@/store/store';
 import { Button } from '@/components/ui/Button';
-import { Users, ClipboardList, Coffee, Zap, ChessKnight, Star, Glasses, Sun, Droplet, Leaf } from 'lucide-react';
+import { Users, ClipboardList, Coffee, Zap, ChessKnight, Star, Glasses, Sun, Droplet, Leaf, CheckCircle, Crown } from 'lucide-react';
 import { createAvatar } from '@dicebear/core';
 import { micah, bottts, adventurer, avataaars, lorelei, pixelArt } from '@dicebear/collection';
 import RaffleModal from './RaffleModal';
 import TimerScreen from './TimerScreen';
 import EvaluationModal from './EvaluationModal';
+import CloseSpaceModal from './CloseSpaceModal';
 
 interface TableRoomProps {
   spaceId: string;
@@ -137,7 +138,7 @@ export default function TableRoom({ spaceId, isHost }: TableRoomProps) {
   const searchParams = useSearchParams();
   const tableTheme = searchParams.get('theme') || 'cafetin';
 
-  const { guests, setGuests, addGuest, updateGuestStatus } = useStore();
+  const { guests, setGuests, addGuest, updateGuestStatus, updateGuestTraits } = useStore();
   const [onlineUsers, setOnlineUsers] = useState<string[]>([]);
   const [spaceData, setSpaceData] = useState<any>(null);
   
@@ -147,11 +148,17 @@ export default function TableRoom({ spaceId, isHost }: TableRoomProps) {
   const [isEvalOpen, setIsEvalOpen] = useState(false);
 
   const [isEditingTimer, setIsEditingTimer] = useState(false);
+  const [isCloseModalOpen, setIsCloseModalOpen] = useState(false);
   const [editTimerHours, setEditTimerHours] = useState('0');
   const [editTimerMinutes, setEditTimerMinutes] = useState('0');
   const [editTimerSeconds, setEditTimerSeconds] = useState('0');
 
   const [tableRadius, setTableRadius] = useState(250);
+
+  const currentGuestId = typeof window !== 'undefined' ? localStorage.getItem(`cafetin_guest_${spaceId}`) : null;
+  const currentGuest = guests.find(g => g.id === currentGuestId);
+  const isCoHost = !!currentGuest?.avatar_traits?.isCoHost;
+  const hasAdminRights = isHost || isCoHost;
 
   useEffect(() => {
     const handleResize = () => setTableRadius(window.innerWidth < 768 ? 150 : 250);
@@ -206,6 +213,16 @@ export default function TableRoom({ spaceId, isHost }: TableRoomProps) {
       });
 
     const broadcastChannel = supabase.channel(`broadcast_${spaceId}`)
+      .on('broadcast', { event: 'guest_joined' }, ({ payload }) => {
+        // Prevent duplicate adds by checking if guest already exists (Zustand addGuest can append, but let's check first)
+        const exists = useStore.getState().guests.some(g => g.id === payload.guest.id);
+        if (!exists) {
+          addGuest(payload.guest);
+        }
+      })
+      .on('broadcast', { event: 'cohost_promoted' }, ({ payload }) => {
+        updateGuestTraits(payload.guestId, payload.traits);
+      })
       .on('broadcast', { event: 'raffle_start' }, ({ payload }) => {
         setRaffleWinner(payload.winner);
         setIsRaffleOpen(true);
@@ -292,7 +309,7 @@ export default function TableRoom({ spaceId, isHost }: TableRoomProps) {
   };
 
   const handleTimerFinish = async () => {
-    if (raffleWinner && isHost) {
+    if (raffleWinner && hasAdminRights) {
       await supabase.from('guests').update({ status: 'finished' }).eq('id', raffleWinner.id);
       
       // Auto-echo local
@@ -305,10 +322,27 @@ export default function TableRoom({ spaceId, isHost }: TableRoomProps) {
         event: 'timer_finish',
         payload: { finishedGuestId: raffleWinner.id }
       });
-    } else if (!isHost) {
+    } else if (!hasAdminRights) {
         setTimerEndsAt(null);
         setRaffleWinner(null);
     }
+  };
+
+  const handleMakeCoHost = async (guestId: string, currentTraits: any) => {
+    if (!isHost) return; // Sólo el Host principal puede dar co-host
+    
+    const newTraits = { ...currentTraits, isCoHost: true };
+    await supabase.from('guests').update({ avatar_traits: newTraits }).eq('id', guestId);
+    
+    // Auto-echo local
+    updateGuestTraits(guestId, newTraits);
+    
+    // Broadcast to update others without reloading
+    await supabase.channel(`broadcast_${spaceId}`).send({
+      type: 'broadcast',
+      event: 'cohost_promoted',
+      payload: { guestId, traits: newTraits }
+    });
   };
 
   const handleSaveTimer = async () => {
@@ -335,9 +369,9 @@ export default function TableRoom({ spaceId, isHost }: TableRoomProps) {
           </div>
           
           <div className="flex items-center gap-1.5 bg-white/90 backdrop-blur-md p-1.5 rounded-full border border-gray-200/50 shadow-sm">
-              {isHost && (
-                <>
-                  <Button variant="ghost" size="sm" onClick={() => setIsEditingTimer(true)} className="rounded-full hover:bg-gray-100 text-gray-700 hover:text-gray-900 transition-all gap-2 px-4 font-medium hidden sm:flex">
+            {hasAdminRights && (
+              <>
+                <Button variant="ghost" size="sm" onClick={() => setIsEditingTimer(true)} className="rounded-full hover:bg-gray-100 text-gray-700 hover:text-gray-900 transition-all gap-2 px-4 font-medium hidden sm:flex">
                     <Coffee size={16} /> Editar Tiempo
                   </Button>
                   <Button variant="ghost" size="sm" onClick={() => setIsEditingTimer(true)} className="rounded-full hover:bg-gray-100 text-gray-700 hover:text-gray-900 transition-all px-3 sm:hidden" title="Editar Tiempo">
@@ -374,6 +408,17 @@ export default function TableRoom({ spaceId, isHost }: TableRoomProps) {
                   <Button variant="ghost" size="sm" onClick={() => setIsEvalOpen(true)} className="rounded-full hover:bg-cafetin-orange/10 text-cafetin-orange hover:text-cafetin-orange transition-all px-3 sm:hidden" title="Evaluación">
                     <ClipboardList size={16} />
                   </Button>
+
+                  {isHost && (
+                    <>
+                      <Button variant="ghost" size="sm" onClick={() => setIsCloseModalOpen(true)} className="rounded-full hover:bg-red-500/10 text-red-600 hover:text-red-700 transition-all gap-2 px-4 font-medium hidden sm:flex">
+                        <CheckCircle size={16} /> Terminar Mesa
+                      </Button>
+                      <Button variant="ghost" size="sm" onClick={() => setIsCloseModalOpen(true)} className="rounded-full hover:bg-red-500/10 text-red-600 hover:text-red-700 transition-all px-3 sm:hidden" title="Terminar Mesa">
+                        <CheckCircle size={16} />
+                      </Button>
+                    </>
+                  )}
                   
                   <div className="w-px h-6 bg-gray-200 mx-1"></div>
                 </>
@@ -490,14 +535,28 @@ export default function TableRoom({ spaceId, isHost }: TableRoomProps) {
             const avatarSvg = createAvatar(getAvatarStyle(styleName) as any, { seed, backgroundColor: ["F8F5EF"] }).toString();
 
             return (
-              <div key={guest.id} className="flex items-center gap-3 p-2 rounded-lg hover:bg-cafetin-cream transition-colors">
+              <div key={guest.id} className="flex items-center gap-3 p-2 rounded-lg hover:bg-cafetin-cream transition-colors group">
                 <div className="w-10 h-10 rounded-full bg-gray-100 overflow-hidden relative flex-shrink-0">
                   <img src={`data:image/svg+xml;utf8,${encodeURIComponent(avatarSvg)}`} alt={guest.name} className="w-full h-full object-cover" />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-cafetin-dark truncate">{guest.name}</p>
+                  <p className="text-sm font-semibold text-cafetin-dark truncate flex items-center gap-1">
+                    {guest.name}
+                    {guest.avatar_traits?.isCoHost && <Crown size={12} className="text-cafetin-orange" />}
+                  </p>
                   <p className="text-xs text-cafetin-light capitalize">{guest.status === 'waiting' ? 'En espera' : guest.status === 'speaking' ? 'Hablando' : 'Ya participó'}</p>
                 </div>
+                
+                {isHost && !guest.avatar_traits?.isCoHost && (
+                  <button 
+                    onClick={() => handleMakeCoHost(guest.id, guest.avatar_traits)} 
+                    title="Hacer Co-Host" 
+                    className="hidden group-hover:block p-1 text-cafetin-orange bg-white rounded-full shadow-sm hover:scale-110 transition-transform"
+                  >
+                    <Crown size={14} />
+                  </button>
+                )}
+                
                 <div className={`w-2.5 h-2.5 rounded-full ${isOnline ? 'bg-green-500' : 'bg-gray-300'}`} title={isOnline ? 'Conectado' : 'Desconectado'} />
               </div>
             );
@@ -508,48 +567,59 @@ export default function TableRoom({ spaceId, isHost }: TableRoomProps) {
         </div>
       </div>
 
-      <RaffleModal 
-        isOpen={isRaffleOpen}
-        winner={raffleWinner}
-        onCancel={handleCancelRaffle}
-        isHost={isHost}
-        onNext={handleStartTimer}
-      />
+      {raffleWinner && (
+        <RaffleModal
+          isOpen={isRaffleOpen}
+          winner={raffleWinner}
+          onCancel={handleCancelRaffle}
+          isHost={hasAdminRights}
+          onNext={handleStartTimer}
+        />
+      )}
 
-      {isHost && isEditingTimer && (
+      {hasAdminRights && isEditingTimer && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
           <div className="bg-white rounded-xl p-6 shadow-xl w-full max-w-sm">
             <h2 className="text-xl font-bold text-cafetin-dark mb-4 text-center">Configurar Tiempo</h2>
             <div className="flex gap-2 mb-6 items-center justify-center">
               <div className="flex flex-col items-center">
-                <input type="number" min="0" max="23" value={editTimerHours} onChange={(e) => setEditTimerHours(e.target.value)} className="w-16 h-12 text-center text-xl border rounded-lg focus:outline-none focus:border-cafetin-teal" />
-                <span className="text-xs text-gray-500 mt-1">hr</span>
+                <input type="number" min="0" max="23" value={editTimerHours} onChange={e => setEditTimerHours(e.target.value)} className="w-16 h-16 text-center text-2xl font-bold rounded-lg border-2 border-gray-200 focus:border-cafetin-teal focus:outline-none" />
+                <span className="text-xs text-gray-500 font-bold mt-1 uppercase">Horas</span>
               </div>
-              <span className="text-2xl font-bold mb-4">:</span>
+              <span className="text-2xl font-bold text-gray-400 mb-5">:</span>
               <div className="flex flex-col items-center">
-                <input type="number" min="0" max="59" value={editTimerMinutes} onChange={(e) => setEditTimerMinutes(e.target.value)} className="w-16 h-12 text-center text-xl border rounded-lg focus:outline-none focus:border-cafetin-teal" />
-                <span className="text-xs text-gray-500 mt-1">min</span>
+                <input type="number" min="0" max="59" value={editTimerMinutes} onChange={e => setEditTimerMinutes(e.target.value)} className="w-16 h-16 text-center text-2xl font-bold rounded-lg border-2 border-gray-200 focus:border-cafetin-teal focus:outline-none" />
+                <span className="text-xs text-gray-500 font-bold mt-1 uppercase">Min</span>
               </div>
-              <span className="text-2xl font-bold mb-4">:</span>
+              <span className="text-2xl font-bold text-gray-400 mb-5">:</span>
               <div className="flex flex-col items-center">
-                <input type="number" min="0" max="59" value={editTimerSeconds} onChange={(e) => setEditTimerSeconds(e.target.value)} className="w-16 h-12 text-center text-xl border rounded-lg focus:outline-none focus:border-cafetin-teal" />
-                <span className="text-xs text-gray-500 mt-1">seg</span>
+                <input type="number" min="0" max="59" value={editTimerSeconds} onChange={e => setEditTimerSeconds(e.target.value)} className="w-16 h-16 text-center text-2xl font-bold rounded-lg border-2 border-gray-200 focus:border-cafetin-teal focus:outline-none" />
+                <span className="text-xs text-gray-500 font-bold mt-1 uppercase">Seg</span>
               </div>
             </div>
-            <div className="flex gap-3 justify-end mt-4">
+            <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={() => setIsEditingTimer(false)}>Cancelar</Button>
-              <Button onClick={handleSaveTimer}>Guardar</Button>
+              <Button variant="primary" onClick={handleSaveTimer}>Guardar</Button>
             </div>
           </div>
         </div>
       )}
 
-      {isHost && (
-        <EvaluationModal
-          isOpen={isEvalOpen}
-          onClose={() => setIsEvalOpen(false)}
-          spaceId={spaceId}
-        />
+      {hasAdminRights && (
+        <>
+          <EvaluationModal
+            isOpen={isEvalOpen}
+            onClose={() => setIsEvalOpen(false)}
+            spaceId={spaceId}
+          />
+          <CloseSpaceModal
+            isOpen={isCloseModalOpen}
+            onClose={() => setIsCloseModalOpen(false)}
+            spaceId={spaceId}
+            spaceName={spaceData?.name || ''}
+            guests={guests}
+          />
+        </>
       )}
     </div>
   );

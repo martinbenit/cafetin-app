@@ -90,15 +90,37 @@ export default function EvaluationModal({ isOpen, onClose, spaceId }: Evaluation
     setIsSaving(false);
   };
 
+  const getClassification = (scores: Record<string, number>, criteriaCount: number) => {
+    const values = Object.values(scores) as number[];
+    const total = values.reduce((a, b) => a + b, 0);
+    const maxPossible = criteriaCount * 5;
+    const percentage = maxPossible > 0 ? (total / maxPossible) * 100 : 0;
+    
+    if (percentage >= 80) return "Rockstar";
+    if (percentage >= 60) return "Promesa";
+    return "En proceso";
+  };
+
+  const getStats = (scores: Record<string, number>) => {
+    const values = Object.values(scores) as number[];
+    const total = values.reduce((a, b) => a + b, 0);
+    const average = values.length > 0 ? (total / values.length).toFixed(1) : '0';
+    return { total, average };
+  };
+
   const exportCSV = () => {
     let csvContent = "data:text/csv;charset=utf-8,";
-    csvContent += "Invitado," + criteriaList.join(",") + "\n";
+    csvContent += "Invitado," + criteriaList.join(",") + ",Total,Promedio,Clasificacion\n";
 
     evaluations.forEach(ev => {
       const row = [ev.guest?.name || 'Desconocido'];
       criteriaList.forEach(c => {
         row.push(ev.scores[c] || 0);
       });
+      const { total, average } = getStats(ev.scores);
+      row.push(total);
+      row.push(average);
+      row.push(getClassification(ev.scores, criteriaList.length));
       csvContent += row.join(",") + "\n";
     });
 
@@ -118,13 +140,18 @@ export default function EvaluationModal({ isOpen, onClose, spaceId }: Evaluation
     const tableData = evaluations.map(ev => {
       const row = [ev.guest?.name || 'Desconocido'];
       criteriaList.forEach(c => row.push(ev.scores[c]?.toString() || '0'));
+      const { total, average } = getStats(ev.scores);
+      row.push(total.toString());
+      row.push(average.toString());
+      row.push(getClassification(ev.scores, criteriaList.length));
       return row;
     });
 
     autoTable(doc, {
-      head: [['Invitado', ...criteriaList]],
+      head: [['Invitado', ...criteriaList, 'Total', 'Promedio', 'Clasific.']],
       body: tableData,
       startY: 25,
+      styles: { fontSize: 8 },
     });
 
     doc.save('evaluaciones_cafetin.pdf');
@@ -205,18 +232,31 @@ export default function EvaluationModal({ isOpen, onClose, spaceId }: Evaluation
               {evaluations.length === 0 ? (
                 <p className="text-sm text-gray-500 italic">No hay evaluaciones guardadas aún en esta mesa.</p>
               ) : (
-                evaluations.map(ev => (
-                  <div key={ev.id} className="bg-gray-50 p-4 rounded-xl border border-gray-200 text-sm">
-                    <p className="font-bold text-gray-900 text-base mb-2">{ev.guest?.name}</p>
-                    <div className="flex flex-wrap gap-2 mt-2">
-                      {Object.entries(ev.scores).map(([crit, val]) => (
-                        <span key={crit} className="bg-white px-2 py-1 rounded-md text-xs border border-gray-200 text-gray-700 shadow-sm flex gap-1 items-center">
-                          {crit}: <span className="font-bold text-cafetin-orange text-sm">{String(val)}</span>
-                        </span>
-                      ))}
+                [...evaluations].sort((a, b) => getStats(b.scores).total - getStats(a.scores).total).map(ev => {
+                  const { total, average } = getStats(ev.scores);
+                  const classification = getClassification(ev.scores, criteriaList.length);
+                  const maxPossible = criteriaList.length * 5;
+                  
+                  return (
+                    <div key={ev.id} className="bg-gray-50 p-4 rounded-xl border border-gray-200 text-sm">
+                      <div className="flex justify-between items-start mb-2">
+                        <p className="font-bold text-gray-900 text-base">{ev.guest?.name}</p>
+                        <span className="font-bold text-xs bg-cafetin-teal/10 text-cafetin-teal px-2 py-1 rounded-full">{classification}</span>
+                      </div>
+                      <div className="flex flex-wrap gap-2 mt-2">
+                        {Object.entries(ev.scores).map(([crit, val]) => (
+                          <span key={crit} className="bg-white px-2 py-1 rounded-md text-xs border border-gray-200 text-gray-700 shadow-sm flex gap-1 items-center">
+                            {crit}: <span className="font-bold text-cafetin-orange text-sm">{String(val)}</span>
+                          </span>
+                        ))}
+                      </div>
+                      <div className="mt-3 pt-3 border-t border-gray-200 flex justify-between text-xs font-bold text-gray-700">
+                         <span>Total: {total} / {maxPossible}</span>
+                         <span>Promedio: {average} ★</span>
+                      </div>
                     </div>
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
 

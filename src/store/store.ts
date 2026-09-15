@@ -16,6 +16,7 @@ interface AppState {
   setGuests: (guests: Guest[]) => void;
   addGuest: (guest: Guest) => void;
   updateGuestStatus: (id: string, status: Guest['status']) => void;
+  updateGuestTraits: (id: string, traits: any) => void;
 }
 
 export const useStore = create<AppState>((set) => ({
@@ -28,5 +29,8 @@ export const useStore = create<AppState>((set) => ({
   addGuest: (guest) => set((state) => ({ guests: [...state.guests, guest] })),
   updateGuestStatus: (id, status) => set((state) => ({
     guests: state.guests.map((g) => g.id === id ? { ...g, status } : g)
+  })),
+  updateGuestTraits: (id, traits) => set((state) => ({
+    guests: state.guests.map((g) => g.id === id ? { ...g, avatar_traits: traits } : g)
   })),
 }));
